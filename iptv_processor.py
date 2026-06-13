@@ -1,26 +1,29 @@
 import re
 from urllib.request import Request, urlopen
 
-# 依然使用这些仓库，但必须进行更深度的清洗
+# 仅保留公网直连源，避开复杂的运营商私网聚合库
 SOURCES = [
-    "https://raw.githubusercontent.com/fanmingming/live/main/tv/m3u/ipv6.m3u",
+    "https://raw.githubusercontent.com/zhimly/iptv/main/tv.m3u",
     "https://raw.githubusercontent.com/yuanzl77/IPTV/main/live.m3u"
 ]
 OUTPUT_FILE = "hebei_iptv.m3u"
 EPG_URL = "https://epg.zsdc.eu.org/t.xml.gz"
 
-def is_public_playable(url):
-    # 彻底封杀所有以 '[' 开头的 IPv6 地址 和 运营商专用 IP
-    if url.startswith("[") or "PLTV" in url or "chinamobile" in url or "112.25" in url:
+def is_clean_public_url(url):
+    """核心过滤器：只保留没有鉴权参数、没有移动/电信专网特征的公网流"""
+    # 过滤掉带有鉴权信息、移动/电信专网特征、IPv6 格式的链接
+    forbidden = ["AuthInfo", "PLTV", "chinamobile", "chinaunicom", "chinatelecom", "112.25", "[2409", "192.168"]
+    if any(f in url for f in forbidden):
         return False
-    # 只允许通过域名访问的链接
-    if "://" in url and not any(x in url for x in ["192.168.", "10.", "172.16."]):
-        return True
-    return False
+    # 必须是 http 开头且包含 m3u8 扩展名
+    return url.startswith("http") and ".m3u8" in url
 
 def process():
     m3u = f'#EXTM3U x-tvg-url="{EPG_URL}"\n'
     seen_names = set()
+    
+    # 关键词列表
+    keywords = ["CCTV", "卫视", "河北", "保定"]
     
     for url in SOURCES:
         try:
@@ -31,10 +34,11 @@ def process():
                     name = lines[i].split(',')[-1]
                     url_line = lines[i+1].strip()
                     
-                    # 关键词匹配 + 必须是公网可播放地址
-                    if any(k in name for k in ["CCTV", "卫视", "河北", "保定"]) and is_public_playable(url_line):
+                    # 只有频道命中关键词 且 地址是纯净公网的 才保留
+                    if any(k in name for k in keywords) and is_clean_public_url(url_line):
                         if name not in seen_names:
-                            m3u += f'#EXTINF:-1,{name}\n{url_line}\n'
+                            group = "河北地方" if any(k in name for k in ["保定", "河北"]) else ("央视频道" if "CCTV" in name else "卫视频道")
+                            m3u += f'#EXTINF:-1 group-title="{group}",{name}\n{url_line}\n'
                             seen_names.add(name)
         except: continue
         
